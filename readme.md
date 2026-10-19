@@ -155,7 +155,7 @@ python -m pytest tests
 
 ## License
 
-This repository does not currently include a `LICENSE` file in the root directory. Before reusing or redistributing this project, verify the licensing terms with the repository owner.
+This repository is licensed under the MIT license.
 
 ## Contributing
 
