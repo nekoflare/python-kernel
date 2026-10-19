@@ -97,6 +97,13 @@ syscall_stack_top_table = 0
 # because %fs was still the exited child's TLS address, not its own).
 fs_base_table = 0
 current_tid = 0
+# need_resched: set to 1 by wake_all_blocked() when it actually unblocked
+# a thread (see take_need_resched() below, called by idt.py's keyboard and
+# xHCI interrupt branches). Without it, the only thing that ever calls
+# schedule() from interrupt context is the 500ms LAPIC timer tick, so a
+# thread woken by a keypress sat runnable-but-not-running until the next
+# tick -- up to 500ms of input lag.
+need_resched = 0
 # Idle loop callback: set by main.py to poll USB HID while idle
 _idle_callback = 0
 
@@ -445,11 +452,28 @@ def wake_all_blocked():
     # no real reason of its own just finds its wait condition still
     # unmet and re-blocks itself (see SYS_READ/SYS_POLL's own retry
     # loops), the same tolerance a spurious wakeup already requires.
+    global need_resched
+    if alive_table == 0:
+        return
     i = 0
     while i < MAX_THREADS:
         if peek64(alive_table + i * 8) != 0:
+            if peek64(blocked_table + i * 8) != 0:
+                # Something was genuinely waiting: ask the interrupt
+                # handler that called us to reschedule right away
+                # instead of leaving it for the next timer tick.
+                need_resched = 1
             poke64(blocked_table + i * 8, 0)
         i = i + 1
+
+def take_need_resched():
+    # Returns 1 (and clears the flag) if wake_all_blocked() unblocked a
+    # thread since the last call -- the caller should then schedule().
+    global need_resched
+    if need_resched != 0:
+        need_resched = 0
+        return 1
+    return 0
 
 def set_current_poll_deadline(tick: int):
     # SYS_POLL (see syscall.py) calls this on itself right before
