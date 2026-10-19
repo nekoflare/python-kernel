@@ -2,7 +2,7 @@ from gdt import KERNEL_CODE_SEL
 from satanic import print_satanic, int_to_str
 from memory import unsigned64
 from lapic import lapic_eoi
-from threads import schedule, mark_current_exited, wake_expired_polls
+from threads import schedule, mark_current_exited, wake_expired_polls, take_need_resched
 from ps2 import on_keyboard_irq
 from xhci import on_xhci_irq
 
@@ -122,9 +122,18 @@ def on_interrupt(vector: int, regs: int):
     elif vector == VECTOR_KEYBOARD:
         on_keyboard_irq()
         lapic_eoi()
+        # A keypress that woke a blocked reader should run it now, not
+        # at the next 500ms timer tick (the timer branch above is the
+        # only other place that calls schedule() from an interrupt).
+        if take_need_resched() != 0:
+            schedule()
     elif vector == VECTOR_XHCI:
         on_xhci_irq()
         lapic_eoi()
+        # Same for USB HID keyboards: on_xhci_irq() -> on_hid_input() ->
+        # tty_input_char() -> wake_all_blocked().
+        if take_need_resched() != 0:
+            schedule()
     else:
         if vector == VECTOR_SOFTWARE:
             print_satanic("Interrupt: software int 0x80")
